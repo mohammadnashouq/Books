@@ -92,6 +92,27 @@ isn't a file:
 Files in `dist/assets/` have content hashes in their names, so they can be
 cached forever; `index.html` should not be cached.
 
+### Docker
+
+The `Dockerfile` builds a small nginx image that serves the app. Building it
+runs `npm run check` first, so an image is only made from code that lints,
+passes the tests and builds.
+
+```bash
+docker build -t books-web .
+docker run -d --name books-web -p 127.0.0.1:3110:8080 \
+  --read-only --tmpfs /tmp --restart unless-stopped books-web
+```
+
+The container listens on port 8080 as an unprivileged user, has a health check
+on `/healthz`, and applies the same SPA rewrite, security headers and caching
+as `public/_headers` (see `deploy/nginx.conf`). It keeps no data, so it needs
+no volume. Put TLS in front of it (a reverse proxy).
+
+Live at https://books.rajamal.com: TeamCity builds and deploys every change on
+`main` (project **Books**): build the image, replace the `books-web` container
+on `127.0.0.1:3110`, then point the subdomain at it over HTTPS.
+
 Fonts (Inter, Literata, Bricolage Grotesque) are bundled from
 [Fontsource](https://fontsource.org), so the app makes no third-party requests.
 
