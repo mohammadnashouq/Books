@@ -1,0 +1,141 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app__main {
+  flex: 1;
+}
+
+/* Top bar */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar__inner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-height: var(--topbar-h);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  border-radius: 12px;
+}
+
+.brand__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+}
+
+.brand__name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.topnav {
+  display: flex;
+  gap: 4px;
+}
+
+.topnav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  color: var(--muted-2);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.topnav__link:hover {
+  background: var(--soft);
+  color: var(--ink);
+}
+
+.topnav__link.is-active {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+/* Bottom tab bar (phones) */
+.bottomnav {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .topnav {
+    display: none;
+  }
+
+  .topbar__inner {
+    min-height: 60px;
+  }
+
+  .app__main {
+    padding-bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom));
+  }
+
+  .bottomnav {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    height: calc(var(--bottomnav-h) + env(safe-area-inset-bottom));
+    padding: 6px 12px env(safe-area-inset-bottom);
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+  }
+
+  .bottomnav__link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border-radius: 12px;
+    color: var(--muted-2);
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  .bottomnav__link.is-active {
+    color: var(--primary-ink);
+    font-weight: 600;
+  }
+
+  .bottomnav__icon {
+    position: relative;
+  }
+
+  .bottomnav__icon .dot-badge {
+    top: -6px;
+    right: -12px;
+  }
+}

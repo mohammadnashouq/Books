@@ -1,0 +1,163 @@
+/* Storage banner, backup panel, toast and crash screen. */
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px var(--gutter);
+  border-bottom: 1px solid;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.banner--danger {
+  background: var(--danger-soft);
+  border-color: #f4c3bb;
+  color: #7a1d0e;
+}
+
+.banner--warning {
+  background: var(--amber-soft);
+  border-color: #f3d79c;
+  color: #5a3a00;
+}
+
+.banner__text {
+  flex: 1 1 320px;
+}
+
+.banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Backup panel on the library page */
+.backup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-top: 32px;
+  padding: 18px 20px;
+}
+
+.backup.is-due {
+  border-color: #f3d79c;
+  background: #fffaf0;
+}
+
+.backup__text {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.backup__due {
+  color: var(--amber-ink);
+}
+
+.backup__error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.backup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Toast */
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 200;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  .toast-region {
+    /* Clear the bottom tab bar on phones. */
+    bottom: calc(var(--bottomnav-h) + 16px + env(safe-area-inset-bottom));
+  }
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: #fff;
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  pointer-events: auto;
+}
+
+.toast__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast__action {
+  flex: none;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #cbbdff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.toast__action:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.toast__action:focus-visible,
+.toast__close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(203, 189, 255, 0.6);
+}
+
+.toast__close {
+  color: #fff;
+}
+
+/* Crash screen (rendered outside the app's layout) */
+.crash {
+  max-width: 560px;
+  margin: 12vh auto;
+  padding: 32px 24px;
+  text-align: center;
+  font-family: var(--font-body);
+  color: var(--ink);
+}
+
+.crash h1 {
+  margin-bottom: 12px;
+  font-size: 28px;
+}
+
+.crash p {
+  color: var(--muted);
+}
+
+.crash__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 24px;
+}
