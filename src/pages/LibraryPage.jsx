@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBooks } from '../store/BooksContext.jsx';
 import { SORTS, STATUS_FILTERS } from '../data/constants.js';
 import { bookProgress } from '../lib/utils.js';
+import BackupPanel from '../components/BackupPanel.jsx';
 import BookCard from '../components/BookCard.jsx';
 import BookFormDialog from '../components/BookFormDialog.jsx';
 import Icon from '../components/Icon.jsx';
@@ -150,6 +151,8 @@ export default function LibraryPage() {
           )}
         </ul>
       )}
+
+      <BackupPanel />
 
       <button type="button" className="fab" aria-label="New book" onClick={() => setCreating(true)}>
         <Icon name="plus" size={26} strokeWidth={2.4} />

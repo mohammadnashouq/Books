@@ -7,6 +7,7 @@ import BookFormDialog from '../components/BookFormDialog.jsx';
 import CommentsPanel from '../components/CommentsPanel.jsx';
 import Icon from '../components/Icon.jsx';
 import StatusChip from '../components/StatusChip.jsx';
+import { useToast } from '../components/Toast.jsx';
 import '../styles/editor.css';
 
 export default function EditorPage() {
@@ -17,21 +18,25 @@ export default function EditorPage() {
     books,
     updateBook,
     deleteBook,
+    restoreBook,
     addChapter,
     updateChapter,
     deleteChapter,
+    restoreChapter,
     addComment,
     toggleComment,
     deleteComment,
+    restoreComment,
+    saveStatus,
   } = useBooks();
+  const { showToast } = useToast();
 
   const book = books.find((b) => b.id === bookId);
   const [commentsOpen, setCommentsOpen] = useState(params.get('comments') === '1');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quote, setQuote] = useState('');
-  const [saving, setSaving] = useState(false);
-  const saveTimer = useRef();
   const textRef = useRef(null);
+  const commentsButtonRef = useRef(null);
 
   const requested = params.get('chapter');
   const chapter = book && (book.chapters.find((c) => c.id === requested) || book.chapters[0]);
@@ -44,8 +49,6 @@ export default function EditorPage() {
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
   }, [chapter?.id, chapter?.text]);
-
-  useEffect(() => () => clearTimeout(saveTimer.current), []);
 
   useEffect(() => {
     if (book) document.title = `${book.title} · Books`;
@@ -84,15 +87,14 @@ export default function EditorPage() {
     setQuote('');
   }
 
-  function flashSaved() {
-    setSaving(true);
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => setSaving(false), 700);
-  }
-
   function editChapter(patch) {
     updateChapter(book.id, chapter.id, patch);
-    flashSaved();
+  }
+
+  function closeComments() {
+    setCommentsOpen(false);
+    // Return focus to the button that opened the slide-over panel.
+    commentsButtonRef.current?.focus({ preventScroll: true });
   }
 
   function handleAddChapter() {
@@ -104,8 +106,45 @@ export default function EditorPage() {
     if (book.chapters.length <= 1) return;
     if (!window.confirm(`Delete “${chapter.title || 'Untitled chapter'}” and its comments?`)) return;
     const next = book.chapters[chapterIndex + 1] || book.chapters[chapterIndex - 1];
-    deleteChapter(book.id, chapter.id);
+    const removed = chapter;
+    const removedIndex = chapterIndex;
+    const removedComments = book.comments.filter((c) => c.chapterId === removed.id);
+    const bookId = book.id;
+    deleteChapter(bookId, removed.id);
     selectChapter(next.id);
+    showToast({
+      message: `Deleted “${removed.title || 'Untitled chapter'}”.`,
+      actionLabel: 'Undo',
+      onAction: () => {
+        restoreChapter(bookId, removed, removedIndex, removedComments);
+        selectChapter(removed.id);
+      },
+    });
+  }
+
+  function handleDeleteComment(commentId) {
+    const index = book.comments.findIndex((c) => c.id === commentId);
+    if (index < 0) return;
+    const removed = book.comments[index];
+    const bookId = book.id;
+    deleteComment(bookId, commentId);
+    showToast({
+      message: 'Comment deleted.',
+      actionLabel: 'Undo',
+      onAction: () => restoreComment(bookId, removed, index),
+    });
+  }
+
+  function handleDeleteBook() {
+    const index = books.findIndex((b) => b.id === book.id);
+    const removed = book;
+    deleteBook(removed.id);
+    navigate('/');
+    showToast({
+      message: `Deleted “${removed.title}”.`,
+      actionLabel: 'Undo',
+      onAction: () => restoreBook(removed, index),
+    });
   }
 
   function startComment() {
@@ -133,13 +172,25 @@ export default function EditorPage() {
           <span className="editor-bar__swatch" style={{ background: color.bg }} aria-hidden="true" />
           <div className="editor-bar__text">
             <h1>{book.title}</h1>
-            <span className={`save-state${saving ? ' is-saving' : ''}`} role="status">
-              {saving ? (
-                'Saving…'
-              ) : (
+            {/* Not a live region: it changes on every keystroke. Failures are
+                announced by the StorageBanner alert instead. */}
+            <span
+              className={`save-state${saveStatus === 'pending' ? ' is-saving' : ''}${
+                saveStatus === 'error' ? ' is-error' : ''
+              }`}
+              data-testid="save-state"
+            >
+              {saveStatus === 'pending' && 'Saving…'}
+              {saveStatus === 'saved' && (
                 <>
                   <Icon name="check" size={14} strokeWidth={2.6} />
-                  All changes saved
+                  Saved in this browser
+                </>
+              )}
+              {saveStatus === 'error' && (
+                <>
+                  <Icon name="alert" size={14} strokeWidth={2.4} />
+                  Not saved
                 </>
               )}
             </span>
@@ -161,6 +212,7 @@ export default function EditorPage() {
           </button>
           <button
             type="button"
+            ref={commentsButtonRef}
             className="icon-btn editor-bar__comments"
             aria-label={`Comments, ${openCount} open`}
             aria-expanded={commentsOpen}
@@ -271,7 +323,7 @@ export default function EditorPage() {
 
         <CommentsPanel
           open={commentsOpen}
-          onClose={() => setCommentsOpen(false)}
+          onClose={closeComments}
           chapterTitle={chapter?.title}
           comments={chapterComments}
           quote={quote}
@@ -281,7 +333,7 @@ export default function EditorPage() {
             setQuote('');
           }}
           onToggle={(id) => toggleComment(book.id, id)}
-          onDelete={(id) => deleteComment(book.id, id)}
+          onDelete={handleDeleteComment}
         />
       </div>
 
@@ -290,10 +342,7 @@ export default function EditorPage() {
         book={book}
         onClose={() => setSettingsOpen(false)}
         onSubmit={(data) => updateBook(book.id, data)}
-        onDelete={() => {
-          deleteBook(book.id);
-          navigate('/');
-        }}
+        onDelete={handleDeleteBook}
       />
     </div>
   );

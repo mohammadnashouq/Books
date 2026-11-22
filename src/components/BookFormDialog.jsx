@@ -9,22 +9,28 @@ export default function BookFormDialog({ open, onClose, onSubmit, onDelete, book
   const ref = useRef(null);
   const id = useId();
   const [form, setForm] = useState(BLANK);
+  const [wasOpen, setWasOpen] = useState(false);
 
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
+  // Reset the form each time the dialog opens (during render, not in an effect).
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setForm(
         book
           ? { title: book.title, genre: book.genre, status: book.status, goal: String(book.goal || ''), color: book.color }
           : BLANK,
       );
+    }
+  }
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open) {
       if (!dialog.open) dialog.showModal();
     } else if (dialog.open) {
       dialog.close();
     }
-    // Reset the form only when the dialog opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));

@@ -64,6 +64,11 @@
   color: var(--muted);
 }
 
+.save-state.is-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .editor-bar__actions {
   display: flex;
   align-items: center;

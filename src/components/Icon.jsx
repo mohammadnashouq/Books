@@ -50,6 +50,14 @@ const PATHS = {
   ),
   x: <path d="M18 6 6 18M6 6l12 12" />,
   send: <path d="M5 12h14M13 6l6 6-6 6" />,
+  download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
+  upload: <path d="M12 16V5M7 10l5-5 5 5M5 20h14" />,
+  alert: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v6M12 16.5v.5" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, strokeWidth = 2, ...rest }) {

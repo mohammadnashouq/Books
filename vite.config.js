@@ -7,4 +7,9 @@ export default defineConfig({
   server: {
     open: true,
   },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+    restoreMocks: true,
+  },
 });

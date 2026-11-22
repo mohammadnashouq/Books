@@ -40,7 +40,7 @@ export default function CommentItem({ comment, onToggle, onDelete, context }) {
             <button
               type="button"
               className="btn btn--ghost btn--sm"
-              onClick={() => window.confirm('Delete this comment?') && onDelete()}
+              onClick={onDelete}
             >
               <Icon name="trash" size={16} />
               Delete

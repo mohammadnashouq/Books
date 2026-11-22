@@ -3,6 +3,9 @@ import CommentItem from './CommentItem.jsx';
 import Icon from './Icon.jsx';
 import '../styles/comments.css';
 
+/** Below this width the panel slides over the page (matches editor.css). */
+export const OVERLAY_QUERY = '(max-width: 1199px)';
+
 export default function CommentsPanel({
   open,
   onClose,
@@ -23,9 +26,38 @@ export default function CommentsPanel({
   const resolvedList = comments.filter((c) => c.resolved);
   const list = tab === 'open' ? openList : resolvedList;
 
+  const closeRef = useRef(null);
+  const panelRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (open && quote) inputRef.current?.focus();
   }, [open, quote]);
+
+  // Where the panel slides over the page, move focus into it when it opens.
+  useEffect(() => {
+    if (!open || quote) return;
+    if (window.matchMedia?.(OVERLAY_QUERY).matches) closeRef.current?.focus();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- only when it opens
+
+  // Escape closes the panel from anywhere on the page, unless a dialog is open
+  // (the dialog handles Escape itself).
+  useEffect(() => {
+    if (!open) return undefined;
+    function onKeyDown(e) {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (document.querySelector('dialog[open]')) return;
+      // As a slide-over it closes from anywhere; as a side column only from inside it.
+      const inside = panelRef.current?.contains(document.activeElement);
+      if (!inside && !window.matchMedia?.(OVERLAY_QUERY).matches) return;
+      onCloseRef.current();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
 
   function submit(e) {
     e?.preventDefault();
@@ -42,14 +74,20 @@ export default function CommentsPanel({
       <aside
         className="comments panel"
         aria-label="Comments"
-        onKeyDown={(e) => e.key === 'Escape' && onClose()}
+        ref={panelRef}
       >
         <div className="comments__head">
           <div>
             <h2 className="panel-title">Comments</h2>
             <p className="small muted">{chapterTitle || 'Untitled chapter'}</p>
           </div>
-          <button type="button" className="icon-btn comments__close" aria-label="Close comments" onClick={onClose}>
+          <button
+            ref={closeRef}
+            type="button"
+            className="icon-btn comments__close"
+            aria-label="Close comments"
+            onClick={onClose}
+          >
             <Icon name="x" />
           </button>
         </div>
