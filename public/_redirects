@@ -1,3 +1,0 @@
-# Netlify / Cloudflare Pages: serve the app for every path so links like
-# /books/<id> work on reload. Real files (assets, favicon) are served first.
-/*  /index.html  200

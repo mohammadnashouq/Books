@@ -25,9 +25,11 @@ export class LibraryFormatError extends Error {
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
 
+/** A valid date as a canonical ISO string (the server only accepts those), or the fallback. */
 function isoOr(value, fallback) {
-  if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return value;
-  return fallback;
+  if (typeof value !== 'string') return fallback;
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? fallback : new Date(time).toISOString();
 }
 
 function idOr(value, seen) {
@@ -234,6 +236,40 @@ export function loadLibrary(storage, createSamples, now) {
     const backupKey = preserveRaw(storage, raw);
     return { books: [], source: 'empty', savedJson: null, problem: { kind: 'corrupt', raw, backupKey, dropped: 0 } };
   }
+}
+
+/**
+ * The library this browser held before accounts existed, read without writing
+ * anything (it runs on every page load). Returns null when there is none, or
+ *   { books, dropped, unreadable, raw }
+ * where `unreadable` means some of the data couldn't be parsed at all and
+ * `raw` is the original text for download.
+ */
+export function peekLegacy(storage, now) {
+  const v2 = tryGet(storage, STORAGE_KEY);
+  const v1 = tryGet(storage, LEGACY_KEY);
+  const raws = [v2.ok ? v2.value : null, v1.ok ? v1.value : null];
+  if (raws.every((r) => r == null)) return null;
+
+  let books = [];
+  let dropped = 0;
+  let unreadable = false;
+  for (const raw of raws) {
+    if (raw == null) continue;
+    try {
+      const parsed = parseLibraryJson(raw, now);
+      books = books.length ? mergeLibraries([], books, parsed.books) : parsed.books;
+      dropped += parsed.dropped;
+    } catch {
+      unreadable = true;
+    }
+  }
+  if (books.length === 0 && !unreadable) return null;
+  const raw =
+    raws[0] != null && raws[1] != null
+      ? JSON.stringify({ [STORAGE_KEY]: raws[0], [LEGACY_KEY]: raws[1] })
+      : (raws[0] ?? raws[1]);
+  return { books, dropped, unreadable, raw };
 }
 
 /** Write the serialized library. Never throws. */

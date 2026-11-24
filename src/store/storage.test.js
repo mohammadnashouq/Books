@@ -93,6 +93,11 @@ describe('normalizeBook', () => {
     expect(new Set(book.chapters.map((c) => c.id)).size).toBe(2);
   });
 
+  it('turns parseable dates into canonical ISO timestamps', () => {
+    const book = normalizeBook({ ...goodBook, updatedAt: '2026-03-04' }, NOW);
+    expect(book.updatedAt).toBe('2026-03-04T00:00:00.000Z');
+  });
+
   it('keeps unknown fields written by a newer version', () => {
     expect(normalizeBook({ ...goodBook, series: 'Saga' }, NOW).series).toBe('Saga');
   });

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useBooks } from '../store/BooksContext.jsx';
 import { coverColor } from '../data/constants.js';
 import { bookProgress, bookWords, countWords, formatNumber, openComments } from '../lib/utils.js';
@@ -9,6 +9,7 @@ import Icon from '../components/Icon.jsx';
 import StatusChip from '../components/StatusChip.jsx';
 import { useToast } from '../components/Toast.jsx';
 import '../styles/editor.css';
+import '../styles/auth.css';
 
 export default function EditorPage() {
   const { bookId } = useParams();
@@ -28,6 +29,10 @@ export default function EditorPage() {
     deleteComment,
     restoreComment,
     saveStatus,
+    saveError,
+    cachedLocally,
+    signedIn,
+    ready,
   } = useBooks();
   const { showToast } = useToast();
 
@@ -57,15 +62,31 @@ export default function EditorPage() {
     };
   }, [book?.title]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  if (!signedIn) {
+    return <Navigate to={`/login?next=${encodeURIComponent(`/books/${bookId}`)}`} replace />;
+  }
+  if (!ready) {
+    return (
+      <div className="container page">
+        <p className="muted">Loading your books…</p>
+      </div>
+    );
+  }
   if (!book) {
+    // Not one of this user's books: it may be someone else's (readable) or gone.
     return (
       <div className="container page">
         <div className="empty">
-          <h1>Book not found</h1>
-          <p className="muted">It may have been deleted.</p>
-          <Link to="/" className="btn btn--primary">
-            Back to library
-          </Link>
+          <h1>You can’t edit this book</h1>
+          <p className="muted">It isn’t one of your books, or it has been deleted.</p>
+          <div className="notice__actions">
+            <Link to={`/read/${encodeURIComponent(bookId)}`} className="btn btn--outline">
+              Read it
+            </Link>
+            <Link to="/" className="btn btn--primary">
+              Your books
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -184,13 +205,13 @@ export default function EditorPage() {
               {saveStatus === 'saved' && (
                 <>
                   <Icon name="check" size={14} strokeWidth={2.6} />
-                  Saved in this browser
+                  Saved to your account
                 </>
               )}
               {saveStatus === 'error' && (
                 <>
                   <Icon name="alert" size={14} strokeWidth={2.4} />
-                  Not saved
+                  {saveError?.kind !== 'rejected' && cachedLocally ? 'Not saved to account · kept in this browser' : 'Not saved'}
                 </>
               )}
             </span>
@@ -297,6 +318,7 @@ export default function EditorPage() {
               <input
                 className="writer__title"
                 aria-label="Chapter title"
+                maxLength={200}
                 placeholder="Chapter title"
                 value={chapter.title}
                 onChange={(e) => editChapter({ title: e.target.value })}
@@ -305,6 +327,7 @@ export default function EditorPage() {
                 ref={textRef}
                 className="writer__text"
                 aria-label="Chapter text"
+                maxLength={2_000_000}
                 placeholder="Start writing…"
                 value={chapter.text}
                 onChange={(e) => editChapter({ text: e.target.value })}

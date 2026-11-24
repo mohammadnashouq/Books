@@ -6,6 +6,7 @@ import '@fontsource-variable/inter/wght.css';
 import '@fontsource-variable/bricolage-grotesque/opsz.css';
 import '@fontsource-variable/literata/wght.css';
 import '@fontsource-variable/literata/wght-italic.css';
+import { AuthProvider } from './store/AuthContext.jsx';
 import { BooksProvider } from './store/BooksContext.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -16,11 +17,13 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary>
       <BrowserRouter>
-        <BooksProvider>
-          <ToastProvider>
-            <App />
-          </ToastProvider>
-        </BooksProvider>
+        <AuthProvider>
+          <BooksProvider>
+            <ToastProvider>
+              <App />
+            </ToastProvider>
+          </BooksProvider>
+        </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>
   </StrictMode>,
