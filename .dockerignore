@@ -4,3 +4,12 @@ dist
 .git
 coverage
 *.sqlite*
+.git
+.github
+.vite
+*.local
+npm-debug.log*
+.DS_Store
+docs
+Dockerfile
+.dockerignore

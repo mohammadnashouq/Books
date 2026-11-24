@@ -1,23 +1,31 @@
-# Books: one container serving the API and the built app.
-FROM node:24-slim AS build
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-RUN npm run build && npm prune --omit=dev
+# Books: production image.
+#
+# Stage 1 installs from the lockfile and runs `npm run check` (lint, tests,
+# build), so an image is only made from code that passes. Stage 2 is plain
+# nginx serving the static `dist/` folder as an unprivileged user on port 8080.
+#
+#   docker build -t books-web .
+#   docker run -d -p 127.0.0.1:3110:8080 --name books-web books-web
+#
+# The app has no server and no secrets: every book lives in the reader's
+# browser (localStorage), so the container keeps no data and needs no volume.
 
-FROM node:24-slim
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001 DATABASE_PATH=/data/books.sqlite
+# Node 22, as in .nvmrc (the tests need 22.22 or newer).
+FROM node:22-alpine AS build
 WORKDIR /app
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/server ./server
-COPY --from=build /app/src/data ./src/data
-COPY --from=build /app/package.json ./
-# The SQLite file lives on a volume so it survives redeploys. Create and
-# chown it before declaring the volume (changes after VOLUME can be discarded).
-RUN mkdir -p /data && chown node:node /data
-VOLUME /data
-USER node
-EXPOSE 3001
-CMD ["node", "server/index.js"]
+
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY . .
+RUN npm run check
+
+
+FROM nginxinc/nginx-unprivileged:1.29-alpine AS web
+
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
