@@ -28,6 +28,8 @@ export default function BookFormDialog({ open, onClose, onSubmit, onDelete, book
     if (!dialog) return;
     if (open) {
       if (!dialog.open) dialog.showModal();
+      // showModal() focuses the first button (Close); start in the title instead.
+      dialog.querySelector('input')?.focus();
     } else if (dialog.open) {
       dialog.close();
     }
@@ -43,7 +45,7 @@ export default function BookFormDialog({ open, onClose, onSubmit, onDelete, book
       title,
       genre: form.genre.trim(),
       status: form.status,
-      goal: Math.max(0, parseInt(form.goal, 10) || 0),
+      goal: Math.min(10_000_000, Math.max(0, parseInt(form.goal, 10) || 0)),
       color: form.color,
     });
     onClose();

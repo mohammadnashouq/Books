@@ -1,11 +1,17 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useBooks } from '../store/BooksContext.jsx';
 import { coverColor } from '../data/constants.js';
 import CommentItem from '../components/CommentItem.jsx';
 import '../styles/comments.css';
 
 export default function CommentsPage() {
+  const { signedIn } = useBooks();
+  if (!signedIn) return <Navigate to="/login?next=%2Fcomments" replace />;
+  return <CommentsList />;
+}
+
+function CommentsList() {
   const { books, toggleComment } = useBooks();
   const [showResolved, setShowResolved] = useState(false);
 

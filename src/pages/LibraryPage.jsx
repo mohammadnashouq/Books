@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useBooks } from '../store/BooksContext.jsx';
+import { useToast } from '../components/Toast.jsx';
+import { backupFileName, downloadText } from '../lib/backup.js';
+import '../styles/auth.css';
 import { SORTS, STATUS_FILTERS } from '../data/constants.js';
 import { bookProgress } from '../lib/utils.js';
 import BackupPanel from '../components/BackupPanel.jsx';
@@ -16,6 +19,119 @@ const SORTERS = {
 };
 
 export default function LibraryPage() {
+  const { signedIn, ready } = useBooks();
+  if (!signedIn) return <Welcome />;
+  if (!ready) {
+    return (
+      <div className="container page">
+        <p className="muted">Loading your books…</p>
+      </div>
+    );
+  }
+  return <MyLibrary />;
+}
+
+function Welcome() {
+  return (
+    <div className="container page library">
+      <div className="empty">
+        <span className="empty__icon">
+          <Icon name="book" size={32} />
+        </span>
+        <h1>Write your books here</h1>
+        <p className="muted">
+          Create a free account with just a username and password to start writing. Anyone can read the books
+          writers share here.
+        </p>
+        <div className="notice__actions">
+          <Link to="/register" className="btn btn--primary btn--lg">
+            Create account
+          </Link>
+          <Link to="/login" className="btn btn--outline btn--lg">
+            Sign in
+          </Link>
+          <Link to="/browse" className="btn btn--ghost btn--lg">
+            Browse books
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Offer to add the library this browser held before accounts existed. */
+function ImportNotice() {
+  const { legacy, importLegacy, dismissLegacy } = useBooks();
+  const { showToast } = useToast();
+  if (!legacy) return null;
+  const n = legacy.books.length;
+  const problems = legacy.unreadable || legacy.dropped > 0;
+  const downloadOriginal = (
+    <button
+      type="button"
+      className="btn btn--outline btn--sm"
+      onClick={() => downloadText(backupFileName(new Date(), 'books-before-accounts'), legacy.raw)}
+    >
+      Download original data
+    </button>
+  );
+
+  if (n === 0) {
+    // Old data exists but none of it could be read: don't hide it, let the writer keep it.
+    return (
+      <section className="notice notice--warning" aria-labelledby="import-title">
+        <div className="notice__text">
+          <h2 id="import-title" className="panel-title">
+            Books saved in this browser couldn’t be read
+          </h2>
+          <p className="small muted">
+            This browser has data from before accounts that couldn’t be read, so it can’t be imported. Download it to
+            keep it; it stays in this browser either way.
+          </p>
+        </div>
+        <div className="notice__actions">
+          {downloadOriginal}
+          <button type="button" className="btn btn--ghost btn--sm" onClick={dismissLegacy}>
+            Dismiss
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="notice" aria-labelledby="import-title">
+      <div className="notice__text">
+        <h2 id="import-title" className="panel-title">
+          Import the books saved in this browser?
+        </h2>
+        <p className="small muted">
+          This browser has {n} {n === 1 ? 'book' : 'books'} from before accounts. Import them to save them to your
+          account. A copy stays in this browser.
+          {problems && ' Some of the old data couldn’t be read; download the original to keep all of it.'}
+        </p>
+      </div>
+      <div className="notice__actions">
+        <button
+          type="button"
+          className="btn btn--primary btn--sm"
+          onClick={() => {
+            const count = importLegacy();
+            showToast({ message: `Imported ${count} ${count === 1 ? 'book' : 'books'} into your account.` });
+          }}
+        >
+          Import {n} {n === 1 ? 'book' : 'books'}
+        </button>
+        {problems && downloadOriginal}
+        <button type="button" className="btn btn--ghost btn--sm" onClick={dismissLegacy}>
+          Not now
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function MyLibrary() {
   const { books, addBook } = useBooks();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
@@ -65,6 +181,8 @@ export default function LibraryPage() {
           New book
         </button>
       </section>
+
+      <ImportNotice />
 
       {books.length > 0 && (
         <section className="library__toolbar" aria-label="Search and filters">

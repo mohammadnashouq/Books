@@ -1,18 +1,21 @@
 import { ME } from '../data/constants.js';
+import { useAuth } from '../store/AuthContext.jsx';
 import { initials, timeAgo } from '../lib/utils.js';
 import Icon from './Icon.jsx';
 
 const AVATAR_COLORS = ['#6D4AFF', '#0B8484', '#D63A7E', '#2F6FE4', '#E5482A'];
 
-function avatarColor(name) {
-  if (name === ME) return { bg: '#FFB020', ink: '#1A1A2E' };
+function avatarColor(name, self) {
+  // ME ("You") is how comments were signed before accounts existed.
+  if (name === ME || name === self) return { bg: '#FFB020', ink: '#1A1A2E' };
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return { bg: AVATAR_COLORS[hash % AVATAR_COLORS.length], ink: '#FFFFFF' };
 }
 
 export default function CommentItem({ comment, onToggle, onDelete, context }) {
-  const color = avatarColor(comment.author);
+  const { user } = useAuth();
+  const color = avatarColor(comment.author, user?.username);
   return (
     <li className={`comment${comment.resolved ? ' is-resolved' : ''}`}>
       <div className="comment__head">

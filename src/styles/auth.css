@@ -1,0 +1,96 @@
+/* Sign in / create account */
+.auth {
+  display: flex;
+  justify-content: center;
+}
+
+.auth__card {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: clamp(20px, 4vw, 32px);
+}
+
+.auth__title {
+  font-size: clamp(26px, 4vw, 32px);
+}
+
+.auth__warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-soft);
+  color: #5a3a00;
+}
+
+.auth__error {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.auth__switch {
+  margin: 0;
+  text-align: center;
+}
+
+/* Account menu in the top bar */
+.account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.account__name {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Notices on the library page */
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--primary-softer);
+}
+
+.notice--warning {
+  border-color: #f3d79c;
+  background: #fffaf0;
+}
+
+.notice__text {
+  flex: 1 1 280px;
+}
+
+.notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Small phones: the top bar has room for the logo and one account button. */
+@media (max-width: 479px) {
+  .account__name,
+  .account .btn--primary {
+    display: none;
+  }
+}
+
+/* Conflict notices above every page */
+.conflicts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px var(--gutter) 0;
+}

@@ -1,117 +1,168 @@
 # Books
 
-A colorful, responsive web app for writing my books: see the whole library,
-write chapter by chapter, and leave comments on the text.
+A colorful, responsive web app for writing books: create an account, write
+chapter by chapter, leave notes on the text, and share your books for anyone
+to read.
 
 Built with [React](https://react.dev), [Vite](https://vite.dev) and
-[React Router](https://reactrouter.com). Works on phones, tablets and laptops.
+[React Router](https://reactrouter.com) in the browser, and a small
+[Express](https://expressjs.com) server storing everything in
+[SQLite](https://sqlite.org) (Node's built-in `node:sqlite`, so there's no
+database server to install). Works on phones, tablets and laptops.
 
 ## Getting started
 
-You need [Node.js](https://nodejs.org) 20.19 or newer to build and run the
-app, and Node 22.22 or newer to run the tests (Vitest and jsdom need it). CI
-uses the version in `.nvmrc`.
+You need [Node.js](https://nodejs.org) 22.22 or newer (CI uses the version in
+`.nvmrc`).
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open the address Vite prints (usually http://localhost:5173).
+`npm run dev` starts both the API server (port 3001) and Vite (usually
+http://localhost:5173), which forwards `/api` to the server. The database is
+created at `data/books.sqlite` on first run.
 
-| Command              | What it does                                   |
-| -------------------- | ---------------------------------------------- |
-| `npm run dev`        | Start the dev server with hot reload           |
-| `npm run build`      | Build the production site into `dist/`         |
-| `npm run preview`    | Serve the production build locally             |
-| `npm run lint`       | Check the code with ESLint                     |
-| `npm test`           | Run the tests once (Vitest + Testing Library)  |
-| `npm run test:watch` | Re-run tests as files change                   |
-| `npm run check`      | Lint, test and build: what CI runs             |
+| Command              | What it does                                              |
+| -------------------- | --------------------------------------------------------- |
+| `npm run dev`        | API server + Vite dev server with hot reload              |
+| `npm run dev:server` | Only the API server, restarting on changes                |
+| `npm run build`      | Build the frontend into `dist/`                           |
+| `npm start`          | Run the server (serves `dist/` when `NODE_ENV=production`) |
+| `npm run preview`    | Build, then serve the built app and the API on port 3001  |
+| `npm run lint`       | Check the code with ESLint                                |
+| `npm test`           | Run all tests once (Vitest + Testing Library + supertest) |
+| `npm run check`      | Lint, test and build: what CI runs                        |
 
 ## Features
 
-- **Library** – every book as a colored cover card with status, progress
-  toward its word goal and open comments. Search, filter by status and sort.
-- **New book / Book settings** – title, genre, status, word goal and cover color.
-- **Editor** – chapters list, chapter title and text, live word counts and
-  autosave with an honest save indicator ("Saving…", "Saved in this browser",
-  or "Not saved").
-- **Comments** – comment on a chapter; select text first to quote it. Resolve,
-  reopen or delete comments. The Comments page lists open comments across all
-  books.
-- **Undo** – deleting a book, chapter or comment shows an Undo button for a few
-  seconds.
-- **Backup** – download the whole library as a `.json` file and import it
-  again (on this or another device) from the Backup panel on the library page.
-  The panel reminds you when your last backup is more than a week old.
-- **Responsive** – top navigation on larger screens, bottom tab bar on phones;
-  the editor shows chapters and comments side by side on wide screens and as a
-  dropdown and slide-over panel (Escape closes it) on smaller ones.
+- **Accounts** – register with just a username and a password, no email.
+  Usernames are 3–32 letters, numbers, dots, dashes or underscores, and are
+  case-insensitive; passwords need at least 8 characters.
+- **Browse and read** – everyone, signed in or not, can browse all books and
+  read them chapter by chapter.
+- **My books** – signed-in writers create, edit and delete their own books.
+  Only the owner can change a book. Comments are private notes: only the
+  owner sees them, while readers see the chapters.
+- **Editor** – chapters, live word counts and autosave with an honest status:
+  "Saving…", "Saved to your account", or "Not saved".
+- **Comments, undo, backup** – comment on a chapter (select text to quote it),
+  undo deletes, and download or import the whole library as JSON.
+- **Import from before accounts** – if this browser holds a library from the
+  earlier, browser-only version, signing in offers to import it into the
+  account. A copy of the old data stays in the browser.
 
-## Where your writing is stored
+### No email means no password reset
 
-There is no server: the library lives in the browser's `localStorage`, under
-the key `books-app:v2`. That means:
+There is no way to recover an account whose password is forgotten. The sign-up
+page says so; tell writers to use a password manager and to download a backup
+from the library page now and then.
 
-- **Back up regularly.** Clearing site data, some "cleanup" tools, or a
-  different browser/device means an empty library. Use **Download backup**.
-- **Saving is checked.** Edits are written about half a second after you stop
-  typing, and straight away when the tab is hidden or closed. If the browser
-  refuses the write (storage full or blocked), the editor says "Not saved", a
-  red banner offers a backup download, and closing the tab asks for
-  confirmation.
-- **Several tabs are fine.** Tabs merge each other's saves book by book. If
-  two tabs edit the same book at once, the most recent edit wins.
-- **Damaged data is never thrown away.** Stored data is validated on load and
-  repaired where possible. Anything unreadable is copied to a
-  `books-app:recovery:<time>` key and a banner offers to download it. If even
-  that copy can't be written, saving pauses until you've downloaded it.
-- **Older data is upgraded.** Libraries saved by version 0.1 (`books-app:v1`)
-  are moved to the new format automatically.
-- If the app ever crashes, the error screen has a **Download my data** button
-  that works without the app.
+## How saving works
 
-The app also asks the browser to keep its storage persistent, so it isn't
-cleared automatically when the disk runs low.
+- Edits are sent to the server about half a second after typing stops, one
+  book at a time. Each book carries a **revision** number, so a save made from
+  an out-of-date copy is refused instead of overwriting newer work.
+- If two devices or tabs changed the same book, the most recently edited
+  version is kept and the other is offered for download on the library page.
+- Every edit is also kept in the browser (`localStorage`, one copy per
+  account). If the server can't be reached, or the session ends, a banner says
+  so, the work stays in the browser, and it's sent when the connection is back
+  or you sign in again, even after closing the tab.
+- Signing out with unsent work asks first. When everything is on the server,
+  signing out removes the browser copy, so nothing is left on a shared computer.
+
+## Security
+
+- Passwords are hashed with scrypt (random salt per password); only the hash is
+  stored. Login answers the same way for an unknown user and a wrong password,
+  and is rate-limited per address and username.
+- Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie (`Secure`
+  in production); the database stores only a SHA-256 of each token. Sessions
+  last 30 days and are deleted on sign-out.
+- Every request that changes data must carry an `X-Books-Client` header, which
+  other sites can't add, so cross-site request forgery is blocked.
+- Books are validated on the server (fields, sizes, chapter and comment
+  references) before anything is written.
+- Responses carry a strict Content-Security-Policy and other security headers.
 
 ## Deploying
 
-`npm run build` produces a static site in `dist/`. Because the app uses normal
-URLs like `/books/<id>`, the host must serve `index.html` for any path that
-isn't a file:
+The app is one Node process that serves the API and the built frontend, with a
+SQLite file on disk. Run it behind an HTTPS reverse proxy (Caddy, nginx, or your
+platform's), because production cookies are `Secure`.
 
-- **Netlify / Cloudflare Pages** – handled by `public/_redirects`; security
-  headers and caching are in `public/_headers`.
-- **Vercel** – handled by `vercel.json` (rewrites and the same headers).
-- **nginx** – `try_files $uri /index.html;`, and copy the headers from
-  `public/_headers`.
-- **GitHub Pages** – has no rewrites; copy `dist/index.html` to `dist/404.html`
-  after building.
+**With Docker**
 
-Files in `dist/assets/` have content hashes in their names, so they can be
-cached forever; `index.html` should not be cached.
+```bash
+docker build -t books .
+docker run -d -p 127.0.0.1:3001:3001 -v books-data:/data -e TRUST_PROXY=1 books
+```
 
-Fonts (Inter, Literata, Bricolage Grotesque) are bundled from
-[Fontsource](https://fontsource.org), so the app makes no third-party requests.
+The database lives in the `books-data` volume at `/data/books.sqlite`, so it
+survives redeploys. The port is published on `127.0.0.1` only, so the reverse
+proxy on the same machine is the only way in.
+
+**Without Docker**
+
+```bash
+npm ci
+npm run build
+NODE_ENV=production HOST=127.0.0.1 DATABASE_PATH=/var/lib/books/books.sqlite TRUST_PROXY=1 npm start
+```
+
+| Variable        | Default               | Meaning                                                  |
+| --------------- | --------------------- | -------------------------------------------------------- |
+| `PORT`          | `3001`                | Port to listen on                                        |
+| `HOST`          | `127.0.0.1`           | Address to bind (`0.0.0.0` in a container)               |
+| `DATABASE_PATH` | `./data/books.sqlite` | SQLite file                                              |
+| `NODE_ENV`      |                       | `production`: Secure cookies, HSTS, serve `dist/`        |
+| `TRUST_PROXY`   | off                   | `1` behind one reverse proxy, so rate limits see real client addresses |
+
+**Only set `TRUST_PROXY` when the server can't be reached except through the
+proxy** (bound to `127.0.0.1`, or a private network the proxy alone can reach).
+It makes the server believe the `X-Forwarded-For` header; anyone who can
+connect directly could fake that header on every request and get around the
+login rate limit.
+
+It runs as a single instance: the SQLite file and the in-memory login rate
+limits aren't shared between processes.
+
+**Backups.** Back up the database file regularly. While the server is running,
+use SQLite's online backup, for example
+`sqlite3 /data/books.sqlite ".backup '/backups/books-$(date +%F).sqlite'"`,
+rather than copying the file (it runs in WAL mode).
+
+Static hosts (Netlify, Vercel, GitHub Pages) can't run the API on their own; the
+browser-only version of the app is on the `feat/production-ready` branch.
 
 ## Project structure
 
 ```
+server/
+  index.js                 Start-up: env vars, database, HTTP server
+  app.js                   Express app: auth, books API, security headers, static files
+  db.js                    SQLite schema and migrations
+  repo.js                  All SQL: users, sessions, books, chapters, comments
+  auth.js                  Password hashing, session tokens, username/password rules
+  validate.js              Server-side book validation
 src/
   main.jsx                 App entry: fonts, error boundary, router, providers
-  App.jsx                  Routes and the storage warning banner
+  App.jsx                  Routes and the save-problem banner
+  lib/api.js               API client
   store/
-    BooksContext.jsx       Library state, actions, saving and tab sync
+    AuthContext.jsx        Who is signed in
+    BooksContext.jsx       The signed-in user's books: editing, syncing, import
+    sync.js                Change detection and reconciling with the server (pure)
     reducer.js             All library changes (pure)
-    storage.js             Load / validate / migrate / save (pure)
-    merge.js               Merging another tab's save (pure)
-  data/                    Constants and sample books
-  lib/                     Word counts, dates, ids, backup files
+    storage.js             Reading, validating and migrating browser data (pure)
+    merge.js               Merging another tab's copy (pure)
+  pages/                   My books, Browse, Reader, Editor, Comments, Sign in
   components/              Layout, cards, dialog, comments, toast, backup, icons
-  pages/                   Library, Editor, Comments, Not found
   styles/                  Global tokens and page styles
-  test/setup.js            Test setup
+  test/                    Test setup and a real in-memory server for tests
 ```
 
-Tests sit next to the code they cover (`*.test.js[x]`).
+Tests sit next to the code they cover (`*.test.js[x]`). The app tests start the
+real server with an in-memory database and talk to it over HTTP.
