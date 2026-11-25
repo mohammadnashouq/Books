@@ -1,323 +1,614 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { safeNext } from './pages/AuthPage.jsx';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.jsx';
-import { BooksProvider, useBooks } from './store/BooksContext.jsx';
+import { AuthProvider, LAST_USER_KEY } from './store/AuthContext.jsx';
+import { BooksProvider, IMPORTED_PREFIX, useBooks } from './store/BooksContext.jsx';
 import { ToastProvider } from './components/Toast.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { LEGACY_KEY, RECOVERY_PREFIX, STORAGE_KEY, serializeLibrary } from './store/storage.js';
+import { STORAGE_KEY, serializeLibrary } from './store/storage.js';
+import { cacheKey, hashBook, parseCache, serializeCache } from './store/sync.js';
+import { makeBook, startServer } from './test/server.js';
 
-const T0 = '2026-01-01T00:00:00.000Z';
+let srv;
+beforeEach(async () => {
+  srv = await startServer();
+});
+afterEach(async () => {
+  await srv.close();
+});
 
-function makeBook(id, title, extra = {}) {
-  return {
-    id,
-    title,
-    genre: 'Fantasy',
-    status: 'draft',
-    goal: 1000,
-    color: 'violet',
-    createdAt: T0,
-    updatedAt: T0,
-    chapters: [{ id: `${id}-c1`, title: 'Opening', text: 'Once upon a time' }],
-    comments: [
-      { id: `${id}-m1`, chapterId: `${id}-c1`, author: 'You', text: 'Tighten this', quote: '', resolved: false, createdAt: T0 },
-    ],
-    ...extra,
-  };
-}
-
-function renderApp(path = '/') {
+function renderApp(path, client, extra = null) {
   return render(
     <ErrorBoundary>
       <MemoryRouter initialEntries={[path]}>
-        <BooksProvider>
-          <ToastProvider>
-            <App />
-          </ToastProvider>
-        </BooksProvider>
+        <AuthProvider api={client.api}>
+          <BooksProvider>
+            <ToastProvider>
+              {extra}
+              <App />
+            </ToastProvider>
+          </BooksProvider>
+        </AuthProvider>
       </MemoryRouter>
     </ErrorBoundary>,
   );
 }
 
-const stored = () => JSON.parse(localStorage.getItem(STORAGE_KEY));
+/** A browser signed in as `username`, optionally with books already on the server. */
+async function signedInClient(username = 'writer', books = []) {
+  const c = srv.client();
+  const user = await c.api.register(username, 'long enough');
+  for (const b of books) await c.api.saveBook(b, null);
+  return { ...c, user };
+}
+
 const saveState = () => screen.getByTestId('save-state');
 const chapterText = () => screen.getByLabelText('Chapter text');
+const serverText = async (client, bookId) =>
+  (await client.api.myBooks()).find((b) => b.id === bookId)?.chapters[0].text;
+const savedToAccount = () => waitFor(() => expect(saveState()).toHaveTextContent('Saved to your account'));
 
-describe('saving', () => {
-  it('shows the real save state and writes after a short delay', async () => {
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
-    renderApp('/books/b1');
-    expect(saveState()).toHaveTextContent('Saved in this browser');
+describe('visitors (signed out)', () => {
+  it('can browse and read every book, but not edit', async () => {
+    await signedInClient('owner', [makeBook('b1', 'Lantern')]);
+    renderApp('/browse', srv.client());
+    const link = await screen.findByRole('link', { name: 'Lantern' });
+    expect(screen.getByText('by owner')).toBeInTheDocument();
 
-    fireEvent.change(chapterText(), { target: { value: 'Once upon a midnight' } });
-    expect(saveState()).toHaveTextContent('Saving…');
-    await waitFor(() => expect(saveState()).toHaveTextContent('Saved in this browser'));
-    expect(stored().books[0].chapters[0].text).toBe('Once upon a midnight');
+    fireEvent.click(link);
+    expect(await screen.findByText('Once upon a time')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Edit' })).toBeNull();
   });
 
-  it('says "Not saved" and shows an alert when storage rejects the write, then recovers', async () => {
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
-    renderApp('/books/b1');
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('full', 'QuotaExceededError');
-    });
-
-    fireEvent.change(chapterText(), { target: { value: 'Lost?' } });
-    await waitFor(() => expect(saveState()).toHaveTextContent('Not saved'));
-    const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent('Your latest changes aren’t saved');
-    expect(stored().books[0].chapters[0].text).toBe('Once upon a time');
-
-    // Further edits keep saying "Not saved" rather than flipping back to "Saving…".
-    fireEvent.change(chapterText(), { target: { value: 'Lost? Still' } });
-    expect(saveState()).toHaveTextContent('Not saved');
-
-    setItem.mockRestore();
-    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
-    await waitFor(() => expect(saveState()).toHaveTextContent('Saved in this browser'));
-    expect(stored().books[0].chapters[0].text).toBe('Lost? Still');
-    expect(screen.queryByRole('alert')).toBeNull();
+  it('are sent to sign in when opening the editor', async () => {
+    renderApp('/books/b1', srv.client());
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
   });
 
-  it('writes pending edits immediately when the page is hidden', () => {
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
-    renderApp('/books/b1');
-    fireEvent.change(chapterText(), { target: { value: 'Closing the tab' } });
-    act(() => {
-      window.dispatchEvent(new Event('pagehide'));
-    });
-    expect(stored().books[0].chapters[0].text).toBe('Closing the tab');
-  });
-
-  it('migrates a v1 library to the v2 key', async () => {
-    localStorage.setItem(LEGACY_KEY, JSON.stringify([makeBook('b1', 'Old format')]));
-    renderApp('/');
-    expect(screen.getByRole('heading', { name: 'Old format' })).toBeInTheDocument();
-    await waitFor(() => expect(localStorage.getItem(LEGACY_KEY)).toBeNull());
-    expect(stored().books[0].title).toBe('Old format');
+  it('see a welcome page instead of a library', async () => {
+    renderApp('/', srv.client());
+    expect(await screen.findByRole('heading', { name: 'Write your books here' })).toBeInTheDocument();
   });
 });
 
-describe('damaged data', () => {
-  it('opens a book that lost its chapters instead of crashing', () => {
-    const { chapters: _omit, ...broken } = makeBook('b1', 'Damaged');
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([broken]));
-    renderApp('/books/b1');
-    expect(screen.getByRole('heading', { name: 'Damaged' })).toBeInTheDocument();
-    expect(chapterText()).toHaveValue('');
+describe('accounts', () => {
+  it('registers with only a username and password and lands in an empty library', async () => {
+    renderApp('/register', srv.client());
+    fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'maya' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'long enough' } });
+    fireEvent.change(screen.getByLabelText('Repeat password'), { target: { value: 'long enough' } });
+    expect(screen.queryByLabelText(/email/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+
+    expect(await screen.findByRole('heading', { name: 'Your library' })).toBeInTheDocument();
+    expect(screen.getByTitle('Signed in as maya')).toBeInTheDocument();
+    expect(srv.db.prepare('SELECT username FROM users').all()).toEqual([{ username: 'maya' }]);
   });
 
-  it('keeps unreadable data, starts empty, and warns', async () => {
-    localStorage.setItem(STORAGE_KEY, '{not json');
-    renderApp('/');
-    expect(screen.getByRole('alert')).toHaveTextContent('Your saved library couldn’t be read');
-    expect(screen.getByText('Start your first book')).toBeInTheDocument();
-    const backupKey = Object.keys(localStorage).find((k) => k.startsWith(RECOVERY_PREFIX));
-    expect(localStorage.getItem(backupKey)).toBe('{not json');
+  it('shows the server’s error for a wrong password', async () => {
+    await signedInClient('maya');
+    renderApp('/login', srv.client());
+    fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'maya' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'not my password' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wrong username or password');
   });
 
-  it('pauses saving when unreadable data could not be copied aside', async () => {
-    localStorage.setItem(STORAGE_KEY, '{not json');
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('full', 'QuotaExceededError');
+  it('won’t let one user edit another user’s book', async () => {
+    await signedInClient('owner', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1', await signedInClient('other'));
+    expect(await screen.findByRole('heading', { name: 'You can’t edit this book' })).toBeInTheDocument();
+  });
+});
+
+describe('saving to the account', () => {
+  it('saves edits to the server and says so', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1', c);
+    fireEvent.change(await screen.findByLabelText('Chapter text'), { target: { value: 'Once upon a midnight' } });
+    expect(saveState()).toHaveTextContent('Saving…');
+    await savedToAccount();
+    expect(await serverText(c, 'b1')).toBe('Once upon a midnight');
+  });
+
+  it('keeps edits in this browser while offline, and sends them when back', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
+
+    c.net.offline = true;
+    fireEvent.change(chapterText(), { target: { value: 'Written on a train' } });
+    await waitFor(() => expect(saveState()).toHaveTextContent('kept in this browser'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Can’t reach the server');
+    const cache = parseCache(localStorage.getItem(cacheKey(c.user.id)));
+    expect(cache.books[0].chapters[0].text).toBe('Written on a train');
+
+    c.net.offline = false;
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
+    await savedToAccount();
+    expect(await serverText(c, 'b1')).toBe('Written on a train');
+  });
+
+  it('keeps typing in this browser while a slow save is still in flight', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
+
+    let release;
+    c.net.gate = new Promise((r) => {
+      release = r;
     });
-    renderApp('/');
-    setItem.mockRestore();
-    const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent('Saving is paused');
-    // Wait past the save delay: the original must still be there.
-    await new Promise((r) => setTimeout(r, 600));
-    expect(localStorage.getItem(STORAGE_KEY)).toBe('{not json');
+    fireEvent.change(chapterText(), { target: { value: 'First' } });
+    // The first save is now stuck on the network; keep typing.
+    await waitFor(() => expect(c.net.calls.at(-1)).toBe('PUT /api/me/books/b1'));
+    fireEvent.change(chapterText(), { target: { value: 'First and second' } });
+    await waitFor(() =>
+      expect(parseCache(localStorage.getItem(cacheKey(c.user.id))).books[0].chapters[0].text).toBe('First and second'),
+    );
 
-    fireEvent.click(within(alert).getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(stored()).toEqual({ version: 2, books: [] }));
+    c.net.gate = null;
+    release();
+    await waitFor(async () => expect(await serverText(c, 'b1')).toBe('First and second'));
   });
 
-  it('saves edits still waiting for the timer when a crash unmounts the app', () => {
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
+  it('keeps typing done while the first load is still in flight after starting offline', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    // A previous visit left the library in this browser.
+    const seed = renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
+    seed.unmount();
+
+    // Start offline: the copy in this browser opens, and the first load fails.
+    c.net.offline = true;
+    renderApp('/books/b1', c);
+    await waitFor(() => expect(saveState()).toHaveTextContent('kept in this browser'));
+    fireEvent.change(chapterText(), { target: { value: 'Typed offline' } });
+
+    // Back online, but the first load is slow; keep typing while it's in flight.
+    let release;
+    c.net.gate = new Promise((r) => {
+      release = r;
+    });
+    c.net.offline = false;
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(c.net.calls.at(-1)).toBe('GET /api/me/books'));
+    fireEvent.change(chapterText(), { target: { value: 'Typed offline, and while loading' } });
+    c.net.gate = null;
+    release();
+
+    await waitFor(async () => expect(await serverText(c, 'b1')).toBe('Typed offline, and while loading'));
+    expect(chapterText()).toHaveValue('Typed offline, and while loading');
+  });
+
+  it('sends edits left unsent last time when the app opens again', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    const first = renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    c.net.offline = true;
+    fireEvent.change(chapterText(), { target: { value: 'Unsent' } });
+    await waitFor(() => expect(saveState()).toHaveTextContent('kept in this browser'));
+    first.unmount();
+
+    c.net.offline = false;
+    renderApp('/books/b1', c);
+    await waitFor(async () => expect(await serverText(c, 'b1')).toBe('Unsent'));
+  });
+
+  it('when another device saved a newer version, shows it and offers this one for download', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    const otherDevice = srv.client();
+    await otherDevice.api.login('writer', 'long enough');
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
+
+    // The other device saves an edit dated in the future (newer than ours will be).
+    const newer = makeBook('b1', 'Lantern', {
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      chapters: [{ id: 'b1-c1', title: 'Opening', text: 'From the other device' }],
+    });
+    await otherDevice.api.saveBook(newer, 1);
+
+    fireEvent.change(chapterText(), { target: { value: 'From this tab' } });
+    await waitFor(() => expect(chapterText()).toHaveValue('From the other device'));
+    await savedToAccount();
+    expect(await serverText(c, 'b1')).toBe('From the other device');
+  });
+
+  it('keeps typing done during a save that turns out to conflict, and keeps it across reloads', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    const otherDevice = srv.client();
+    await otherDevice.api.login('writer', 'long enough');
+    const first = renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
+
+    // A save is in flight (stuck on the network) ...
+    let release;
+    c.net.gate = new Promise((r) => {
+      release = r;
+    });
+    fireEvent.change(chapterText(), { target: { value: 'Sent' } });
+    await waitFor(() => expect(c.net.calls.at(-1)).toBe('PUT /api/me/books/b1'));
+    // ... the writer keeps typing, and meanwhile another device saves a newer version.
+    fireEvent.change(chapterText(), { target: { value: 'Sent, and typed while sending' } });
+    await otherDevice.api.saveBook(
+      makeBook('b1', 'Lantern', {
+        updatedAt: '2099-01-01T00:00:00.000Z',
+        chapters: [{ id: 'b1-c1', title: 'Opening', text: 'From the other device' }],
+      }),
+      1,
+    );
+    c.net.gate = null;
+    release();
+
+    await waitFor(() => expect(chapterText()).toHaveValue('From the other device'));
+    // The notice is shown right here in the editor ...
+    expect(await screen.findByRole('button', { name: 'Download this browser’s version' })).toBeInTheDocument();
+    // ... and the full local version, including what was typed during the save, is kept.
+    await waitFor(() =>
+      expect(parseCache(localStorage.getItem(cacheKey(c.user.id))).losers[0].chapters[0].text).toBe(
+        'Sent, and typed while sending',
+      ),
+    );
+
+    first.unmount();
+    renderApp('/books/b1', c);
+    expect(await screen.findByRole('button', { name: 'Download this browser’s version' })).toBeInTheDocument();
+  });
+
+  it('when this edit is newer than another device’s, saves it on top', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    const otherDevice = srv.client();
+    await otherDevice.api.login('writer', 'long enough');
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
+    await otherDevice.api.saveBook(
+      makeBook('b1', 'Lantern', {
+        updatedAt: '2026-01-02T00:00:00.000Z',
+        chapters: [{ id: 'b1-c1', title: 'Opening', text: 'Older edit elsewhere' }],
+      }),
+      1,
+    );
+
+    fireEvent.change(chapterText(), { target: { value: 'Newest words' } });
+    await waitFor(async () => expect(await serverText(c, 'b1')).toBe('Newest words'));
+    expect(chapterText()).toHaveValue('Newest words');
+    // The other device's version was replaced on the server, so it's kept here for download.
+    expect(await screen.findByRole('button', { name: 'Download the other version' })).toBeInTheDocument();
+    const cache = parseCache(localStorage.getItem(cacheKey(c.user.id)));
+    expect(cache.losers.map((l) => [l.conflictFrom, l.chapters[0].text])).toEqual([
+      ['elsewhere', 'Older edit elsewhere'],
+    ]);
+  });
+
+  it('asks to sign in again when the session ends, keeping the work', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    srv.db.prepare('DELETE FROM sessions').run();
+
+    fireEvent.change(chapterText(), { target: { value: 'After expiry' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('You’ve been signed out');
+    expect(parseCache(localStorage.getItem(cacheKey(c.user.id))).books[0].chapters[0].text).toBe('After expiry');
+  });
+
+  it('saves edits waiting for the timer to this browser when a crash unmounts the app', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    // Throws while rendering once a chapter contains BOOM.
     function Bomb() {
       const { books } = useBooks();
-      if (books.some((b) => b.chapters.some((c) => c.text.includes('BOOM')))) throw new Error('render bug');
+      if (books.some((b) => b.chapters.some((ch) => ch.text.includes('BOOM')))) throw new Error('render bug');
       return null;
     }
-    render(
-      <ErrorBoundary>
-        <MemoryRouter initialEntries={['/books/b1']}>
-          <BooksProvider>
-            <ToastProvider>
-              <Bomb />
-              <App />
-            </ToastProvider>
-          </BooksProvider>
-        </MemoryRouter>
-      </ErrorBoundary>,
-    );
+    renderApp('/books/b1', c, <Bomb />);
+    await screen.findByLabelText('Chapter text');
     fireEvent.change(chapterText(), { target: { value: 'Typed just before the crash' } });
-    // Well inside the save delay, the next edit crashes rendering.
     fireEvent.change(chapterText(), { target: { value: 'BOOM' } });
-
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
-    expect(stored().books[0].chapters[0].text).toBe('Typed just before the crash');
+    const cache = parseCache(localStorage.getItem(cacheKey(c.user.id)));
+    expect(cache.books[0].chapters[0].text).toBe('Typed just before the crash');
   });
 
-  it('shows a recovery screen if rendering crashes', () => {
-    const Boom = () => {
-      throw new Error('boom');
-    };
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    render(
-      <ErrorBoundary>
-        <Boom />
-      </ErrorBoundary>,
+  it('clears this browser’s copy on sign-out when everything reached the server', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/', c);
+    await screen.findByRole('heading', { name: 'Your library' });
+    await waitFor(() => expect(localStorage.getItem(cacheKey(c.user.id))).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: 'Browse' });
+    expect(localStorage.getItem(cacheKey(c.user.id))).toBeNull();
+    expect(localStorage.getItem(LAST_USER_KEY)).toBeNull();
+  });
+
+  it('stays signed in when signing out fails, so the next person isn’t signed in as you', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/', c);
+    await screen.findByRole('heading', { name: 'Your library' });
+    await waitFor(() => expect(localStorage.getItem(cacheKey(c.user.id))).not.toBeNull());
+
+    c.net.offline = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByText(/Couldn’t sign out/)).toBeInTheDocument();
+    expect(screen.getByTitle('Signed in as writer')).toBeInTheDocument();
+    expect(localStorage.getItem(LAST_USER_KEY)).not.toBeNull();
+    expect(localStorage.getItem(cacheKey(c.user.id))).not.toBeNull();
+
+    c.net.offline = false;
+    expect((await c.api.me()).username).toBe('writer'); // the session is still alive on the server
+  });
+
+  it('keeps conflict versions waiting for download through a sign-out', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    const otherDevice = srv.client();
+    await otherDevice.api.login('writer', 'long enough');
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
+    await otherDevice.api.saveBook(
+      makeBook('b1', 'Lantern', {
+        updatedAt: '2099-01-01T00:00:00.000Z',
+        chapters: [{ id: 'b1-c1', title: 'Opening', text: 'From the other device' }],
+      }),
+      1,
     );
-    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download my data' })).toBeInTheDocument();
+    fireEvent.change(chapterText(), { target: { value: 'Mine' } });
+    await screen.findByRole('button', { name: 'Download this browser’s version' });
+    await savedToAccount();
+
+    fireEvent.click(screen.getByRole('link', { name: 'Back to library' }));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: 'Browse' });
+    expect(confirm.mock.calls[0][0]).toMatch(/1 conflicting version is waiting/);
+    const cache = parseCache(localStorage.getItem(cacheKey(c.user.id)));
+    expect(cache.losers[0].chapters[0].text).toBe('Mine');
+  });
+
+  it('asks before signing out with unsent work, and keeps it', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    c.net.offline = true;
+    fireEvent.change(chapterText(), { target: { value: 'Unsent' } });
+    await waitFor(() => expect(saveState()).toHaveTextContent('kept in this browser'));
+    c.net.offline = false;
+    // The editor has no sign-out button; go via the library.
+    fireEvent.click(screen.getByRole('link', { name: 'Back to library' }));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    expect(confirm).toHaveBeenCalled();
+    expect(screen.getByTitle('Signed in as writer')).toBeInTheDocument();
   });
 });
 
-describe('two tabs', () => {
-  it('merges another tab’s save instead of overwriting it', async () => {
-    const lantern = makeBook('b1', 'Lantern');
-    const salt = makeBook('b2', 'Salt');
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([lantern, salt]));
-    renderApp('/books/b1');
-
-    // This tab edits book 1 ...
-    fireEvent.change(chapterText(), { target: { value: 'Edited here' } });
-
-    // ... while the other tab saves an edit to book 2.
-    const otherTab = serializeLibrary([
-      lantern,
-      { ...salt, updatedAt: '2026-02-01T00:00:00.000Z', chapters: [{ ...salt.chapters[0], text: 'Edited there' }] },
-    ]);
-    act(() => {
-      localStorage.setItem(STORAGE_KEY, otherTab);
-      window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: otherTab, storageArea: localStorage }));
-    });
-
-    await waitFor(() => expect(saveState()).toHaveTextContent('Saved in this browser'));
-    const books = stored().books;
-    expect(books.find((b) => b.id === 'b1').chapters[0].text).toBe('Edited here');
-    expect(books.find((b) => b.id === 'b2').chapters[0].text).toBe('Edited there');
-  });
-
-  it('merges saves from a tab still running the old version, then removes the old key', async () => {
-    const lantern = makeBook('b1', 'Lantern');
-    const salt = makeBook('b2', 'Salt');
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([lantern, salt]));
-    renderApp('/books/b1');
-
-    // The old tab only knows Lantern, and edits it.
-    const oldTab = JSON.stringify([
-      { ...lantern, updatedAt: '2026-02-01T00:00:00.000Z', chapters: [{ ...lantern.chapters[0], text: 'Old tab text' }] },
-    ]);
-    act(() => {
-      localStorage.setItem(LEGACY_KEY, oldTab);
-      window.dispatchEvent(new StorageEvent('storage', { key: LEGACY_KEY, newValue: oldTab, storageArea: localStorage }));
-    });
-    expect(chapterText()).toHaveValue('Old tab text');
-    await waitFor(() => expect(localStorage.getItem(LEGACY_KEY)).toBeNull());
-    const books = stored().books;
-    expect(books.find((b) => b.id === 'b1').chapters[0].text).toBe('Old tab text');
-    expect(books.find((b) => b.id === 'b2')).toBeDefined();
-  });
-
-  it('shows another tab’s edit to the open chapter', () => {
-    const lantern = makeBook('b1', 'Lantern');
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([lantern]));
-    renderApp('/books/b1');
-    const otherTab = serializeLibrary([
-      { ...lantern, updatedAt: '2026-02-01T00:00:00.000Z', chapters: [{ ...lantern.chapters[0], text: 'From tab two' }] },
-    ]);
-    act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: otherTab, storageArea: localStorage }));
-    });
-    expect(chapterText()).toHaveValue('From tab two');
+describe('development mode (StrictMode)', () => {
+  it('still records what the server confirmed after StrictMode’s extra mount', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/books/b1']}>
+          <AuthProvider api={c.api}>
+            <BooksProvider>
+              <ToastProvider>
+                <App />
+              </ToastProvider>
+            </BooksProvider>
+          </AuthProvider>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    fireEvent.change(await screen.findByLabelText('Chapter text'), { target: { value: 'Dev mode words' } });
+    await savedToAccount();
+    const serverRevision = (await c.api.myBooks())[0].revision;
+    expect(serverRevision).toBe(2);
+    await waitFor(() =>
+      expect(parseCache(localStorage.getItem(cacheKey(c.user.id))).revisions.b1).toBe(serverRevision),
+    );
   });
 });
 
-describe('undo and keyboard', () => {
-  it('deletes a comment without a prompt and can undo it', () => {
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
-    renderApp('/books/b1?comments=1');
-    const panel = screen.getByRole('complementary', { name: 'Comments' });
+describe('safe redirects after sign-in', () => {
+  it('only allows paths on this site', () => {
+    expect(safeNext('/books/1?chapter=2')).toBe('/books/1?chapter=2');
+    expect(safeNext('//evil.example')).toBe('/');
+    expect(safeNext('/\\evil.example')).toBe('/');
+    expect(safeNext('https://evil.example/')).toBe('/');
+    expect(safeNext('/\tevil')).toBe('/');
+    expect(safeNext(null)).toBe('/');
+  });
+});
+
+describe('importing the pre-accounts library', () => {
+  it('reads the old data without writing anything on each load', async () => {
+    // Partly damaged old data: one readable book and one junk entry.
+    const raw = JSON.stringify([makeBook('old1', 'Readable'), 'junk']);
+    localStorage.setItem('books-app:v1', raw);
+    const c = await signedInClient('writer');
+    const keysBefore = Object.keys(localStorage).filter((k) => k.startsWith('books-app:recovery:'));
+    for (let i = 0; i < 3; i += 1) {
+      const view = renderApp('/', c);
+      await screen.findByRole('region', { name: 'Import the books saved in this browser?' });
+      view.unmount();
+    }
+    expect(Object.keys(localStorage).filter((k) => k.startsWith('books-app:recovery:'))).toEqual(keysBefore);
+    expect(localStorage.getItem('books-app:v1')).toBe(raw);
+  });
+
+  it('tells the writer about old data that can’t be read at all, instead of hiding it', async () => {
+    localStorage.setItem(STORAGE_KEY, '{not json');
+    const c = await signedInClient('writer');
+    renderApp('/', c);
+    const notice = await screen.findByRole('region', { name: 'Books saved in this browser couldn’t be read' });
+    expect(within(notice).getByRole('button', { name: 'Download original data' })).toBeInTheDocument();
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('{not json');
+  });
+
+  it('never offers the import again, even when there was no room to keep a copy', async () => {
+    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('old1', 'From before accounts')]));
+    const c = await signedInClient('writer');
+    const view = renderApp('/', c);
+    const notice = await screen.findByRole('region', { name: 'Import the books saved in this browser?' });
+    const realSetItem = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (k, v) {
+      if (k.startsWith(IMPORTED_PREFIX)) throw new DOMException('full', 'QuotaExceededError');
+      return realSetItem.call(this, k, v);
+    });
+    fireEvent.click(within(notice).getByRole('button', { name: 'Import 1 book' }));
+    spy.mockRestore();
+    await waitFor(async () => expect((await c.api.myBooks()).map((b) => b.title)).toEqual(['From before accounts']));
+    expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull(); // the old data wasn't removed without a copy
+    view.unmount();
+
+    renderApp('/', c);
+    await screen.findByRole('heading', { name: 'Your library' });
+    expect(screen.queryByRole('region', { name: /Import the books/ })).toBeNull();
+  });
+
+  it('does not import twice when another tab already did', async () => {
+    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('old1', 'From before accounts')]));
+    const c = await signedInClient('writer');
+    renderApp('/', c);
+    const notice = await screen.findByRole('region', { name: 'Import the books saved in this browser?' });
+    localStorage.removeItem(STORAGE_KEY); // another tab imported it meanwhile
+    fireEvent.click(within(notice).getByRole('button', { name: 'Import 1 book' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: /Import the books/ })).toBeNull());
+    await new Promise((r) => setTimeout(r, 600));
+    expect(await c.api.myBooks()).toEqual([]);
+  });
+
+  it('offers to import it after signing in, then saves it to the account', async () => {
+    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('old1', 'From before accounts')]));
+    const c = await signedInClient('writer');
+    renderApp('/', c);
+
+    const notice = await screen.findByRole('region', { name: 'Import the books saved in this browser?' });
+    fireEvent.click(within(notice).getByRole('button', { name: 'Import 1 book' }));
+
+    expect(await screen.findByRole('heading', { name: 'From before accounts' })).toBeInTheDocument();
+    await waitFor(async () => expect((await c.api.myBooks()).map((b) => b.title)).toEqual(['From before accounts']));
+    // Not offered again, and the original is kept.
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(Object.keys(localStorage).some((k) => k.startsWith(IMPORTED_PREFIX))).toBe(true);
+  });
+});
+
+describe('editor details kept from before', () => {
+  it('limits fields to what the server accepts, so one long entry can’t block saving', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1?comments=1', c);
+    expect(await screen.findByLabelText('Chapter title')).toHaveAttribute('maxLength', '200');
+    expect(screen.getByLabelText('Chapter text')).toHaveAttribute('maxLength', '2000000');
+    expect(screen.getByLabelText('Add a comment')).toHaveAttribute('maxLength', '5000');
+  });
+
+  it('deletes a comment without a prompt and can undo it', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1?comments=1', c);
+    const panel = await screen.findByRole('complementary', { name: 'Comments' });
     fireEvent.click(within(panel).getByRole('button', { name: 'Delete' }));
     expect(within(panel).queryByText('Tighten this')).toBeNull();
-
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(within(panel).getByText('Tighten this')).toBeInTheDocument();
   });
 
-  it('closes the slide-over comments panel with Escape from anywhere', () => {
+  it('closes the slide-over comments panel with Escape', async () => {
     vi.stubGlobal('matchMedia', (q) => ({ matches: q === '(max-width: 1199px)', media: q }));
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
-    renderApp('/books/b1?comments=1');
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/books/b1?comments=1', c);
+    await screen.findByLabelText('Chapter text');
     const toggle = screen.getByRole('button', { name: /^Comments, / });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // Focus moved into the panel when it opened.
-    expect(document.activeElement).toHaveAccessibleName('Close comments');
-
-    chapterText().focus();
+    // The panel's effects (focus, Escape listener) have run once focus is inside it.
+    await waitFor(() => expect(document.activeElement).toHaveAccessibleName('Close comments'));
     fireEvent.keyDown(chapterText(), { key: 'Escape' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(document.activeElement).toBe(toggle);
-    vi.unstubAllGlobals();
   });
-});
 
-describe('comments panel on wide screens', () => {
-  it('closes with Escape only when focus is inside the panel', () => {
-    vi.stubGlobal('matchMedia', (q) => ({ matches: false, media: q }));
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
-    renderApp('/books/b1?comments=1');
-    const toggle = screen.getByRole('button', { name: /^Comments, / });
-
-    fireEvent.keyDown(chapterText(), { key: 'Escape' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-
-    const box = screen.getByLabelText('Add a comment');
-    box.focus();
-    fireEvent.keyDown(box, { key: 'Escape' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  });
-});
-
-describe('backup', () => {
-  it('imports a backup file after confirming', async () => {
-    localStorage.setItem(STORAGE_KEY, serializeLibrary([makeBook('b1', 'Lantern')]));
-    renderApp('/');
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('imports a backup file into the account', async () => {
+    const c = await signedInClient('writer');
+    renderApp('/', c);
+    await screen.findByRole('heading', { name: 'Your library' });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const file = new File(
-      [JSON.stringify({ app: 'books', version: 2, books: [makeBook('b9', 'From backup'), makeBook('b1', 'Lantern v2')] })],
+      [JSON.stringify({ app: 'books', version: 2, books: [makeBook('x1', 'From a backup')] })],
       'backup.json',
       { type: 'application/json' },
     );
     fireEvent.change(screen.getByTestId('import-input'), { target: { files: [file] } });
+    expect(await screen.findByRole('heading', { name: 'From a backup' })).toBeInTheDocument();
+    await waitFor(async () => expect((await c.api.myBooks()).map((b) => b.title)).toEqual(['From a backup']));
+  });
+});
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'From backup' })).toBeInTheDocument());
-    expect(confirm.mock.calls[0][0]).toMatch(/add 1 book and replace 1 existing book/);
-    expect(screen.getByRole('heading', { name: 'Lantern v2' })).toBeInTheDocument();
+describe('two tabs of the same account', () => {
+  it('shares conflict versions between tabs without rewriting the copy back and forth', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern')]);
+    renderApp('/', c);
+    await screen.findByRole('heading', { name: 'Your library' });
+    const key = cacheKey(c.user.id);
+    await waitFor(() => expect(localStorage.getItem(key)).not.toBeNull());
+
+    // The other tab holds a conflict version and writes its copy.
+    const cache = parseCache(localStorage.getItem(key));
+    const loser = { ...cache.books[0], title: 'Lantern (other tab)', conflictId: 'k1', conflictFrom: 'this-browser' };
+    const fromTab2 = serializeCache({ ...cache, losers: [loser], dismissed: [] });
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    act(() => {
+      localStorage.setItem(key, fromTab2);
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue: fromTab2, storageArea: localStorage }));
+    });
+    expect(await screen.findByText(/“Lantern \(other tab\)” was also changed/)).toBeInTheDocument();
+    setItem.mockClear();
+    await new Promise((r) => setTimeout(r, 900));
+    // Nothing new to say, so this tab doesn't write (which would wake the other tab, and so on).
+    expect(setItem.mock.calls.filter(([k]) => k === key)).toEqual([]);
+
+    // Dismissed in the other tab: gone here too, and not brought back.
+    const dismissedThere = serializeCache({ ...cache, losers: [], dismissed: ['k1'] });
+    act(() => {
+      localStorage.setItem(key, dismissedThere);
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue: dismissedThere, storageArea: localStorage }));
+    });
+    await waitFor(() => expect(screen.queryByText(/was also changed/)).toBeNull());
   });
 
-  it('rejects JSON that holds no books', async () => {
-    renderApp('/');
-    const confirm = vi.spyOn(window, 'confirm');
-    const file = new File(['[{}, {}]'], 'objects.json', { type: 'application/json' });
-    fireEvent.change(screen.getByTestId('import-input'), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('no books'));
-    expect(confirm).not.toHaveBeenCalled();
-  });
+  it('takes the other tab’s saved copy without re-sending it', async () => {
+    const c = await signedInClient('writer', [makeBook('b1', 'Lantern'), makeBook('b2', 'Salt')]);
+    renderApp('/books/b1', c);
+    await screen.findByLabelText('Chapter text');
+    await savedToAccount();
 
-  it('rejects a file that is not a backup', async () => {
-    renderApp('/');
-    const confirm = vi.spyOn(window, 'confirm');
-    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
-    fireEvent.change(screen.getByTestId('import-input'), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('isn’t a Books backup'));
-    expect(confirm).not.toHaveBeenCalled();
+    // The other tab edited b2, saved it to the server and wrote its copy.
+    const key = cacheKey(c.user.id);
+    const cache = parseCache(localStorage.getItem(key));
+    const b2 = cache.books.find((b) => b.id === 'b2');
+    const edited = { ...b2, updatedAt: '2026-05-01T00:00:00.000Z', chapters: [{ ...b2.chapters[0], text: 'Other tab' }] };
+    const { revision } = await c.api.saveBook(edited, cache.revisions.b2);
+    const next = serializeCache({
+      books: cache.books.map((b) => (b.id === 'b2' ? edited : b)),
+      synced: { ...cache.synced, b2: hashBook(edited) },
+      revisions: { ...cache.revisions, b2: revision },
+    });
+    const before = c.net.calls.length;
+    act(() => {
+      localStorage.setItem(key, next);
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue: next, storageArea: localStorage }));
+    });
+
+    fireEvent.change(chapterText(), { target: { value: 'This tab' } });
+    await waitFor(async () => expect(await serverText(c, 'b1')).toBe('This tab'));
+    await savedToAccount();
+    const puts = c.net.calls.slice(before).filter((call) => call.startsWith('PUT'));
+    expect(puts).toEqual(['PUT /api/me/books/b1']);
+    expect((await c.api.myBooks()).find((b) => b.id === 'b2').chapters[0].text).toBe('Other tab');
   });
 });

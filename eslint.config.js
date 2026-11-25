@@ -23,7 +23,7 @@ export default [
     },
   },
   {
-    files: ['**/*.test.{js,jsx}', 'src/test/**', '*.config.js'],
+    files: ['**/*.test.{js,jsx}', 'src/test/**', '*.config.js', 'server/**'],
     languageOptions: { globals: { ...globals.node } },
   },
 ];

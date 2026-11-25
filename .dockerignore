@@ -1,5 +1,9 @@
 node_modules
 dist
+/data
+.git
+coverage
+*.sqlite*
 .git
 .github
 .vite

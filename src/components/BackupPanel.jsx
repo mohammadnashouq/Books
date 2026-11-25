@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { useBooks } from '../store/BooksContext.jsx';
+import { prepareImport, useBooks } from '../store/BooksContext.jsx';
 import { exportLibrary, parseLibraryJson } from '../store/storage.js';
 import {
   backupFileName,
@@ -60,7 +60,9 @@ export default function BackupPanel() {
     if (adding) parts.push(`add ${adding} ${adding === 1 ? 'book' : 'books'}`);
     if (replacing) parts.push(`replace ${replacing} existing ${replacing === 1 ? 'book' : 'books'} with the backup’s copy`);
     if (!window.confirm(`Import “${file.name}”? This will ${parts.join(' and ')}.`)) return;
-    importBooks(imported);
+    // Books already in this account keep their id (and replace it); others get
+    // fresh ids so they can't clash with someone else's book on the server.
+    importBooks(imported.map((b) => (ids.has(b.id) ? b : prepareImport(b))));
     showToast({ message: `Imported ${imported.length} ${imported.length === 1 ? 'book' : 'books'}.` });
   }
 
@@ -71,8 +73,8 @@ export default function BackupPanel() {
           Backup
         </h2>
         <p className="small muted">
-          Your books are saved in this browser only. Clearing site data or switching device loses them, so download a
-          backup now and then.{' '}
+          Your books are saved to your account. There’s no email, so if you forget your password they can’t be
+          recovered: download a backup now and then.{' '}
           <strong className={due ? 'backup__due' : undefined}>
             {lastBackup ? `Last backup ${timeAgo(lastBackup)}.` : 'No backup yet.'}
           </strong>

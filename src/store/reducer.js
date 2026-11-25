@@ -79,6 +79,15 @@ export function reducer(books, action) {
     }
     case 'library/merge':
       return mergeLibraries(action.base, books, action.remote);
+    case 'library/replace':
+      return action.books;
+    case 'book/replace': {
+      // Put the server's copy of a book in place (or back, if it was deleted
+      // here). Keeps its updatedAt: this is not a new edit.
+      const i = books.findIndex((b) => b.id === action.book.id);
+      if (i < 0) return [action.book, ...books];
+      return books.map((b) => (b.id === action.book.id ? action.book : b));
+    }
     default:
       return books;
   }

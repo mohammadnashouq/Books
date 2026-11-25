@@ -4,6 +4,6 @@ import { cleanup } from '@testing-library/react';
 
 afterEach(() => {
   cleanup();
-  localStorage.clear();
+  if (typeof window !== 'undefined') window.localStorage.clear();
   vi.unstubAllGlobals();
 });

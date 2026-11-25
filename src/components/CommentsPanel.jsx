@@ -107,6 +107,7 @@ export default function CommentsPanel({
           <textarea
             id={`${id}-text`}
             ref={inputRef}
+            maxLength={5000}
             rows={3}
             placeholder="Leave a note on this chapter…"
             value={text}
