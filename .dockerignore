@@ -1,8 +1,7 @@
 node_modules
 dist
-/data
-.git
 coverage
+/data
 *.sqlite*
 .git
 .github

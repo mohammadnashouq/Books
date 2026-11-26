@@ -101,7 +101,8 @@ docker run -d -p 127.0.0.1:3001:3001 -v books-data:/data -e TRUST_PROXY=1 books
 ```
 
 The database lives in the `books-data` volume at `/data/books.sqlite`, so it
-survives redeploys. The port is published on `127.0.0.1` only, so the reverse
+survives redeploys. Building the image runs `npm run check` first (lint, tests,
+build), so an image is only made from code that passes. The port is published on `127.0.0.1` only, so the reverse
 proxy on the same machine is the only way in.
 
 **Without Docker**
@@ -129,6 +130,12 @@ login rate limit.
 It runs as a single instance: the SQLite file and the in-memory login rate
 limits aren't shared between processes.
 
+**Live deploy:** https://books.rajamal.com. TeamCity (project **Books**) builds
+the image on every change to `main`, then runs `deploy/run-container.sh`, which
+replaces the `books-web` container on `127.0.0.1:3110` (data in the
+`books-data` volume) and waits for its health check before the subdomain is
+pointed at it over HTTPS.
+
 **Backups.** Back up the database file regularly. While the server is running,
 use SQLite's online backup, for example
 `sqlite3 /data/books.sqlite ".backup '/backups/books-$(date +%F).sqlite'"`,
@@ -136,27 +143,6 @@ rather than copying the file (it runs in WAL mode).
 
 Static hosts (Netlify, Vercel, GitHub Pages) can't run the API on their own; the
 browser-only version of the app is on the `feat/production-ready` branch.
-### Docker
-
-The `Dockerfile` builds a small nginx image that serves the app. Building it
-runs `npm run check` first, so an image is only made from code that lints,
-passes the tests and builds.
-
-```bash
-docker build -t books-web .
-docker run -d --name books-web -p 127.0.0.1:3110:8080 \
-  --read-only --tmpfs /tmp --restart unless-stopped books-web
-```
-
-The container listens on port 8080 as an unprivileged user, has a health check
-on `/healthz`, and applies the same SPA rewrite, security headers and caching
-as `public/_headers` (see `deploy/nginx.conf`). It keeps no data, so it needs
-no volume. Put TLS in front of it (a reverse proxy).
-
-Live at https://books.rajamal.com: TeamCity builds and deploys every change on
-`main` (project **Books**): build the image, replace the `books-web` container
-on `127.0.0.1:3110`, then point the subdomain at it over HTTPS.
-
 Fonts (Inter, Literata, Bricolage Grotesque) are bundled from
 [Fontsource](https://fontsource.org), so the app makes no third-party requests.
 
